@@ -2,22 +2,21 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"conduit/backend/internal/config"
 	"conduit/backend/internal/modules/articles"
 	"conduit/backend/internal/modules/comments"
 	"conduit/backend/internal/modules/users"
 	"conduit/backend/internal/shared/infrastructure/events"
-	"conduit/backend/internal/shared/infrastructure/postgres"
+	"conduit/backend/internal/shared/infrastructure/mysql"
 )
 
 type Container struct {
 	Config   config.Config
 	Logger   *slog.Logger
-	Pool     *pgxpool.Pool
+	DB       *sql.DB
 	Events   *events.InMemoryBus
 	Users    *users.Module
 	Articles *articles.Module
@@ -25,7 +24,7 @@ type Container struct {
 }
 
 func NewContainer(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Container, error) {
-	pool, err := postgres.Connect(ctx, postgres.ConnectionConfig{
+	db, err := mysql.Connect(ctx, mysql.ConnectionConfig{
 		URL:     cfg.Database.URL,
 		PoolMax: cfg.Database.PoolMax,
 		Timeout: cfg.Database.Timeout,
@@ -34,22 +33,22 @@ func NewContainer(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		return nil, err
 	}
 
-	if _, err := postgres.RunMigrations(ctx, pool, postgres.EmbeddedMigrations(), logger); err != nil {
-		pool.Close()
+	if _, err := mysql.RunMigrations(ctx, db, mysql.EmbeddedMigrations(), logger); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
 
 	bus := events.NewInMemoryBus(logger)
-	usersModule := users.NewModule(users.Dependencies{DB: pool, Config: cfg})
+	usersModule := users.NewModule(users.Dependencies{DB: db, Config: cfg})
 	articlesModule := articles.NewModule(articles.Dependencies{
-		DB:                   pool,
+		DB:                   db,
 		Events:               bus,
 		Authors:              usersModule.AuthorDirectory,
 		Authenticate:         usersModule.Authenticate,
 		OptionalAuthenticate: usersModule.OptionalAuthenticate,
 	})
 	commentsModule := comments.NewModule(comments.Dependencies{
-		DB:                   pool,
+		DB:                   db,
 		Events:               bus,
 		Authors:              usersModule.AuthorDirectory,
 		Articles:             articlesModule.Catalog,
@@ -60,7 +59,7 @@ func NewContainer(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	return &Container{
 		Config:   cfg,
 		Logger:   logger,
-		Pool:     pool,
+		DB:       db,
 		Events:   bus,
 		Users:    usersModule,
 		Articles: articlesModule,
@@ -69,5 +68,5 @@ func NewContainer(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 }
 
 func (c *Container) Close() {
-	c.Pool.Close()
+	_ = c.DB.Close()
 }

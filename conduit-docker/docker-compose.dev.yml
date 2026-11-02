@@ -1,36 +1,35 @@
 services:
-  conduit-postgres:
-    image: postgres:18.3
-    container_name: conduit-postgres
+  conduit-mysql:
+    image: mysql:8.4
+    container_name: conduit-mysql
     restart: unless-stopped
     environment:
-      POSTGRES_DB: conduit_dev
-      POSTGRES_USER: dev_user
-      POSTGRES_PASSWORD: dev_pass
+      MYSQL_ROOT_PASSWORD: dev_root_pass
+      MYSQL_DATABASE: conduit_dev
+      MYSQL_USER: dev_user
+      MYSQL_PASSWORD: dev_pass
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - conduit-postgres-data:/var/lib/postgresql
+      - conduit-mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  conduit-pgadmin:
-    image: dpage/pgadmin4:9
-    container_name: conduit-pgadmin
+  conduit-phpmyadmin:
+    image: phpmyadmin:5
+    container_name: conduit-phpmyadmin
     restart: unless-stopped
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@conduit.dev
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PMA_HOST: conduit-mysql
     ports:
       - "8081:80"
     depends_on:
-      conduit-postgres:
+      conduit-mysql:
         condition: service_healthy
 
 volumes:
-  conduit-postgres-data:
+  conduit-mysql-data:

@@ -4,12 +4,12 @@ package integration
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	articlesdomain "conduit/backend/internal/modules/articles/domain"
 	articlesinfra "conduit/backend/internal/modules/articles/infrastructure"
@@ -18,7 +18,7 @@ import (
 	usersdomain "conduit/backend/internal/modules/users/domain"
 	usersinfra "conduit/backend/internal/modules/users/infrastructure"
 	sharedomain "conduit/backend/internal/shared/domain"
-	"conduit/backend/internal/shared/infrastructure/postgres"
+	"conduit/backend/internal/shared/infrastructure/mysql"
 	"conduit/backend/test/support"
 )
 
@@ -27,16 +27,16 @@ func connect(t *testing.T) context.Context {
 	return context.Background()
 }
 
-func newPool(t *testing.T) (context.Context, *pgxpool.Pool) {
+func newPool(t *testing.T) (context.Context, *sql.DB) {
 	t.Helper()
 	ctx := connect(t)
 	database := support.StartTestDatabase(t)
-	pool, err := postgres.Connect(ctx, postgres.ConnectionConfig{URL: database.URL, PoolMax: 4, Timeout: 5 * time.Second})
+	pool, err := mysql.Connect(ctx, mysql.ConnectionConfig{URL: database.URL, PoolMax: 4, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(pool.Close)
-	if _, err := postgres.RunMigrations(ctx, pool, postgres.EmbeddedMigrations(), nil); err != nil {
+	t.Cleanup(func() { _ = pool.Close() })
+	if _, err := mysql.RunMigrations(ctx, pool, mysql.EmbeddedMigrations(), nil); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, pool
@@ -45,17 +45,17 @@ func newPool(t *testing.T) (context.Context, *pgxpool.Pool) {
 func TestMigrationsAreIdempotent(t *testing.T) {
 	ctx := connect(t)
 	database := support.StartTestDatabase(t)
-	pool, err := postgres.Connect(ctx, postgres.ConnectionConfig{URL: database.URL, PoolMax: 4, Timeout: 5 * time.Second})
+	pool, err := mysql.Connect(ctx, mysql.ConnectionConfig{URL: database.URL, PoolMax: 4, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
 
-	first, err := postgres.RunMigrations(ctx, pool, postgres.EmbeddedMigrations(), nil)
+	first, err := mysql.RunMigrations(ctx, pool, mysql.EmbeddedMigrations(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := postgres.RunMigrations(ctx, pool, postgres.EmbeddedMigrations(), nil)
+	second, err := mysql.RunMigrations(ctx, pool, mysql.EmbeddedMigrations(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 func TestMigrationsSurviveConcurrentStarts(t *testing.T) {
 	ctx := connect(t)
 	database := support.StartTestDatabase(t)
-	pool, err := postgres.Connect(ctx, postgres.ConnectionConfig{URL: database.URL, PoolMax: 8, Timeout: 5 * time.Second})
+	pool, err := mysql.Connect(ctx, mysql.ConnectionConfig{URL: database.URL, PoolMax: 8, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestMigrationsSurviveConcurrentStarts(t *testing.T) {
 	results := make(chan error, 4)
 	for range 4 {
 		go func() {
-			_, err := postgres.RunMigrations(ctx, pool, postgres.EmbeddedMigrations(), nil)
+			_, err := mysql.RunMigrations(ctx, pool, mysql.EmbeddedMigrations(), nil)
 			results <- err
 		}()
 	}
@@ -86,7 +86,7 @@ func TestMigrationsSurviveConcurrentStarts(t *testing.T) {
 	}
 }
 
-func buildUser(t *testing.T, repo *usersinfra.PostgresRepository, username, email string, now time.Time) usersdomain.User {
+func buildUser(t *testing.T, repo *usersinfra.MySQLRepository, username, email string, now time.Time) usersdomain.User {
 	t.Helper()
 	name, err := usersdomain.NewUsername(sharedomain.RawString(username))
 	if err != nil {
@@ -101,7 +101,7 @@ func buildUser(t *testing.T, repo *usersinfra.PostgresRepository, username, emai
 
 func TestUserRepository(t *testing.T) {
 	ctx, pool := newPool(t)
-	users := usersinfra.NewPostgresRepository(pool)
+	users := usersinfra.NewMySQLRepository(pool)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	user := buildUser(t, users, "JohnDoe", "John@Mail.com", base)
@@ -211,8 +211,8 @@ func TestUserRepository(t *testing.T) {
 
 func TestFollowRepository(t *testing.T) {
 	ctx, pool := newPool(t)
-	users := usersinfra.NewPostgresRepository(pool)
-	follows := usersinfra.NewPostgresFollowRepository(pool)
+	users := usersinfra.NewMySQLRepository(pool)
+	follows := usersinfra.NewMySQLFollowRepository(pool)
 	now := time.Now()
 	a := buildUser(t, users, "alpha", "a@mail.com", now)
 	b := buildUser(t, users, "bravo", "b@mail.com", now)
@@ -267,7 +267,7 @@ func rawTags(values ...string) sharedomain.Raw {
 	return sharedomain.RawOf(entries)
 }
 
-func buildArticle(t *testing.T, repo *articlesinfra.PostgresRepository, authorID, slug, title string, tags []string, now time.Time) articlesdomain.Article {
+func buildArticle(t *testing.T, repo *articlesinfra.MySQLRepository, authorID, slug, title string, tags []string, now time.Time) articlesdomain.Article {
 	t.Helper()
 	articleTitle, _ := articlesdomain.NewArticleTitle(sharedomain.RawString(title))
 	description, _ := articlesdomain.NewArticleDescription(sharedomain.RawString("About " + title))
@@ -284,8 +284,8 @@ func buildArticle(t *testing.T, repo *articlesinfra.PostgresRepository, authorID
 
 func TestArticleRepository(t *testing.T) {
 	ctx, pool := newPool(t)
-	users := usersinfra.NewPostgresRepository(pool)
-	articles := articlesinfra.NewPostgresRepository(pool)
+	users := usersinfra.NewMySQLRepository(pool)
+	articles := articlesinfra.NewMySQLRepository(pool)
 	now := time.Now()
 	author := buildUser(t, users, "author", "author@mail.com", now)
 	reader := buildUser(t, users, "reader", "reader@mail.com", now)
@@ -466,7 +466,7 @@ func TestArticleRepository(t *testing.T) {
 			t.Fatal("the article is gone")
 		}
 		var leftovers int
-		pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM article_tags WHERE article_id = $1) + (SELECT count(*) FROM favorites WHERE article_id = $1)", first.ID()).Scan(&leftovers)
+		pool.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM article_tags WHERE article_id = ?) + (SELECT COUNT(*) FROM favorites WHERE article_id = ?)", first.ID(), first.ID()).Scan(&leftovers)
 		expectEqual(t, leftovers, 0)
 		if deleted, _ := articles.DeleteByID(ctx, first.ID()); deleted {
 			t.Fatal("deleting twice reports false")
@@ -476,9 +476,9 @@ func TestArticleRepository(t *testing.T) {
 
 func TestCommentRepository(t *testing.T) {
 	ctx, pool := newPool(t)
-	users := usersinfra.NewPostgresRepository(pool)
-	articles := articlesinfra.NewPostgresRepository(pool)
-	comments := commentsinfra.NewPostgresRepository(pool)
+	users := usersinfra.NewMySQLRepository(pool)
+	articles := articlesinfra.NewMySQLRepository(pool)
+	comments := commentsinfra.NewMySQLRepository(pool)
 	now := time.Now()
 
 	author := buildUser(t, users, "author", "author@mail.com", now)
@@ -544,4 +544,81 @@ func TestCommentRepository(t *testing.T) {
 	}
 	remaining, _ := comments.ListByArticle(ctx, other.ID())
 	expectEqual(t, len(remaining), 0)
+}
+
+func TestMySQLSemantics(t *testing.T) {
+	ctx, pool := newPool(t)
+	users := usersinfra.NewMySQLRepository(pool)
+	articles := articlesinfra.NewMySQLRepository(pool)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	author := buildUser(t, users, "author", "author@mail.com", now)
+	if err := users.Add(ctx, author); err != nil {
+		t.Fatal(err)
+	}
+	article := buildArticle(t, articles, author.ID(), "first", "First", []string{"Go", "go"}, now)
+	if err := articles.Add(ctx, article); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("updating with unchanged values still reports a match", func(t *testing.T) {
+		updated, err := users.Update(ctx, author)
+		if err != nil || !updated {
+			t.Fatalf("user update: %v %v", updated, err)
+		}
+		updated, err = articles.Update(ctx, article)
+		if err != nil || !updated {
+			t.Fatalf("article update: %v %v", updated, err)
+		}
+	})
+
+	t.Run("slugs and tags are case sensitive", func(t *testing.T) {
+		if _, ok, _ := articles.FindBySlug(ctx, "FIRST"); ok {
+			t.Fatal("slug lookup must be case sensitive")
+		}
+		upper := "Go"
+		page, err := articles.FindPage(ctx, articlesdomain.PageQuery{Tag: &upper, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectEqual(t, page.Total, 1)
+		missing := "GO"
+		page, _ = articles.FindPage(ctx, articlesdomain.PageQuery{Tag: &missing, Limit: 10})
+		expectEqual(t, page.Total, 0)
+	})
+
+	t.Run("tags keep their stored order", func(t *testing.T) {
+		found, ok, err := articles.FindBySlug(ctx, "first")
+		if err != nil || !ok {
+			t.Fatalf("find failed: %v %v", ok, err)
+		}
+		expectDeep(t, found.Snapshot().TagList, []string{"Go", "go"})
+	})
+
+	t.Run("an empty author filter matches nothing", func(t *testing.T) {
+		page, err := articles.FindPage(ctx, articlesdomain.PageQuery{AuthorIDs: []string{}, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectEqual(t, page.Total, 0)
+		expectEqual(t, len(page.Items), 0)
+	})
+
+	t.Run("ids compare regardless of case", func(t *testing.T) {
+		found, ok, err := users.FindByID(ctx, strings.ToUpper(author.ID()))
+		if err != nil || !ok {
+			t.Fatalf("lookup failed: %v %v", ok, err)
+		}
+		expectEqual(t, found.ID(), author.ID())
+	})
+
+	t.Run("a missing author is rejected by the foreign key", func(t *testing.T) {
+		orphan := buildArticle(t, articles, sharedomain.NewEntityID(), "orphan", "Orphan", nil, now)
+		if err := articles.Add(ctx, orphan); err == nil {
+			t.Fatal("expected a foreign key violation")
+		}
+		if err := articles.Favorite(ctx, article.ID(), sharedomain.NewEntityID()); err == nil {
+			t.Fatal("favorite with an unknown user must not be silently ignored")
+		}
+	})
 }

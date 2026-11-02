@@ -284,8 +284,8 @@ func TestDeleteArticle(t *testing.T) {
 	expectProblem(t, author.client.Delete(path, author.auth()), 404, "article", "not found")
 
 	var leftovers int
-	database := app.Container.Pool
-	database.QueryRow(context.Background(), "SELECT (SELECT count(*) FROM comments) + (SELECT count(*) FROM favorites) + (SELECT count(*) FROM article_tags)").Scan(&leftovers)
+	database := app.Container.DB
+	database.QueryRowContext(context.Background(), "SELECT (SELECT count(*) FROM comments) + (SELECT count(*) FROM favorites) + (SELECT count(*) FROM article_tags)").Scan(&leftovers)
 	expectEqual(t, leftovers, 0)
 }
 

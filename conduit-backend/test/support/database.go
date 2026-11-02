@@ -3,15 +3,18 @@ package support
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
-	"github.com/jackc/pgx/v5"
+	"conduit/backend/internal/shared/infrastructure/mysql"
 )
 
-const DefaultTestDatabaseURL = "postgres://dev_user:dev_pass@localhost:5432/conduit_dev"
+const DefaultTestDatabaseURL = "mysql://dev_user:dev_pass@localhost:3306/conduit_dev"
 
 type TestDatabase struct {
 	Name string
@@ -27,13 +30,13 @@ func StartTestDatabase(tb testing.TB) *TestDatabase {
 	}
 	name := RandomDatabaseName()
 
-	withAdminConn(tb, adminURL, func(ctx context.Context, conn *pgx.Conn) error {
-		_, err := conn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize())
+	withAdminConn(tb, adminURL, func(ctx context.Context, db *sql.DB) error {
+		_, err := db.ExecContext(ctx, "CREATE DATABASE "+quoteIdentifier(name)+" CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
 		return err
 	})
 	tb.Cleanup(func() {
-		withAdminConn(tb, adminURL, func(ctx context.Context, conn *pgx.Conn) error {
-			_, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)")
+		withAdminConn(tb, adminURL, func(ctx context.Context, db *sql.DB) error {
+			_, err := db.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(name))
 			return err
 		})
 	})
@@ -54,15 +57,19 @@ func RandomDatabaseName() string {
 	return "conduit_test_" + hex.EncodeToString(suffix)
 }
 
-func withAdminConn(tb testing.TB, adminURL string, run func(context.Context, *pgx.Conn) error) {
+func quoteIdentifier(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+func withAdminConn(tb testing.TB, adminURL string, run func(context.Context, *sql.DB) error) {
 	tb.Helper()
 	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, adminURL)
+	db, err := mysql.Connect(ctx, mysql.ConnectionConfig{URL: adminURL, PoolMax: 1, Timeout: 10 * time.Second})
 	if err != nil {
-		tb.Fatalf("cannot connect to the test PostgreSQL server: %v", err)
+		tb.Fatalf("cannot connect to the test MySQL server: %v", err)
 	}
-	defer conn.Close(ctx)
-	if err := run(ctx, conn); err != nil {
+	defer db.Close()
+	if err := run(ctx, db); err != nil {
 		tb.Fatalf("admin statement failed: %v", err)
 	}
 }

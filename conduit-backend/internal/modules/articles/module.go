@@ -7,11 +7,11 @@ import (
 	"conduit/backend/internal/modules/articles/infrastructure"
 	"conduit/backend/internal/modules/articles/presentation/rest"
 	sharedapp "conduit/backend/internal/shared/application"
-	"conduit/backend/internal/shared/infrastructure/postgres"
+	"conduit/backend/internal/shared/infrastructure/mysql"
 )
 
 type Dependencies struct {
-	DB                   postgres.DB
+	DB                   mysql.DB
 	Events               sharedapp.EventBus
 	Authors              sharedapp.AuthorDirectory
 	Authenticate         echo.MiddlewareFunc
@@ -40,7 +40,7 @@ type Module struct {
 }
 
 func NewModule(deps Dependencies) *Module {
-	repository := infrastructure.NewPostgresRepository(deps.DB)
+	repository := infrastructure.NewMySQLRepository(deps.DB)
 	slugs := application.NewArticleSlugs(repository)
 
 	useCases := UseCases{

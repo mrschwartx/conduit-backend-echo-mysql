@@ -1,16 +1,17 @@
 services:
-  conduit-postgres:
-    image: postgres:18.3
-    container_name: conduit-postgres
+  conduit-mysql:
+    image: mysql:8.4
+    container_name: conduit-mysql
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${DB_NAME:-conduit}
-      POSTGRES_USER: ${DB_USER:-conduit}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required, run make docker/env}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+      MYSQL_DATABASE: ${DB_NAME:-conduit}
+      MYSQL_USER: ${DB_USER:-conduit}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required, run make docker/env}
     volumes:
-      - conduit-postgres-data:/var/lib/postgresql
+      - conduit-mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -24,7 +25,7 @@ services:
     restart: unless-stopped
     environment:
       APP_LEVEL: ${APP_LEVEL:-development}
-      DATABASE_URL: postgres://${DB_USER:-conduit}:${DB_PASSWORD}@conduit-postgres:5432/${DB_NAME:-conduit}
+      DATABASE_URL: mysql://${DB_USER:-conduit}:${DB_PASSWORD}@conduit-mysql:3306/${DB_NAME:-conduit}
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required, run make docker/env}
       AUTH_TOKEN_TTL: ${AUTH_TOKEN_TTL:-7d}
       CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
@@ -32,8 +33,8 @@ services:
     ports:
       - "${PORT:-8080}:8080"
     depends_on:
-      conduit-postgres:
+      conduit-mysql:
         condition: service_healthy
 
 volumes:
-  conduit-postgres-data:
+  conduit-mysql-data:

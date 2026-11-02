@@ -10,11 +10,11 @@ import (
 	"conduit/backend/internal/modules/comments/presentation/rest"
 	sharedapp "conduit/backend/internal/shared/application"
 	sharedomain "conduit/backend/internal/shared/domain"
-	"conduit/backend/internal/shared/infrastructure/postgres"
+	"conduit/backend/internal/shared/infrastructure/mysql"
 )
 
 type Dependencies struct {
-	DB                   postgres.Querier
+	DB                   mysql.Querier
 	Events               sharedapp.EventBus
 	Authors              sharedapp.AuthorDirectory
 	Articles             application.ArticleCatalog
@@ -38,7 +38,7 @@ type Module struct {
 }
 
 func NewModule(deps Dependencies) *Module {
-	repository := infrastructure.NewPostgresRepository(deps.DB)
+	repository := infrastructure.NewMySQLRepository(deps.DB)
 
 	useCases := UseCases{
 		CreateComment:           application.NewCreateComment(repository, deps.Articles, deps.Authors),
